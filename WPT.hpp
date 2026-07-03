@@ -81,7 +81,7 @@ namespace dsp {
 		}
 
 		/// @brief Reverses a filter's tap order.
-		static constexpr std::vector<float> mirror(const std::vector<float>& wavelet) {
+		static std::vector<float> mirror(const std::vector<float>& wavelet) {
 			std::vector<float> mirror;
 			mirror.reserve(wavelet.size());
 			for(int index = wavelet.size() - 1; index >= 0; --index)
@@ -91,7 +91,7 @@ namespace dsp {
 
 		/// @brief Negates every even-indexed tap (0, 2, 4, ...); half of the
 		/// quadrature mirror relationship used to derive lp from h.
-		static constexpr std::vector<float> flipSigns(const std::vector<float>& wavelet) {
+		static std::vector<float> flipSigns(const std::vector<float>& wavelet) {
 			std::vector<float> mirror = wavelet;
 			for(std::size_t index = 0; index < wavelet.size(); index += 2)
 				mirror[index] = -mirror[index];

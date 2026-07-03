@@ -15,7 +15,7 @@
 cmake_minimum_required(VERSION 3.18)
 project(wpt VERSION 1.0.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 14)  # WPT.hpp's actual floor is std::make_unique (C++14)
 # Catches member-initializer-list order mismatching declaration order (C++
 # initializes in declaration order regardless of initializer-list order) --
 # the root cause of a past intermittent segfault in this header.

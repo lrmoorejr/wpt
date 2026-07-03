@@ -44,7 +44,7 @@ dsp::WPT wpt({-0.1294f, -0.2241f, 0.8365f, -0.4830f}, 10);  // Daubechies-2
 
 ## Requirements
 
-- C++20 or later (uses concepts)
+- C++14 or later (uses `std::make_unique`)
 - Header-only -- copy `WPT.hpp` into your project and `#include` it
 - Optional: [`Ensure.hpp`](https://github.com/lrmoorejr/ensure) for its `ensure()` helper; if
   it's not present, `WPT.hpp` falls back to plain `assert()` (see below)
