@@ -16,6 +16,7 @@
  * limitations under the License.
  */
 
+#include <memory>
 #include <vector>
 
 // Ensure.hpp is an optional dependency: if it's available (either as part of this
