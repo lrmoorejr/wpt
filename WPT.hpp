@@ -45,12 +45,19 @@
  *
  * push() is per-sample and online rather than block-based: each Level keeps
  * a small circular buffer and alternates which of two physical sub-levels
- * (Even/Odd) a given push descends into, realizing decimation-by-2 without
- * buffering a block first, at the cost of maintaining 2^depth Level objects.
+ * (Even/Odd) a given push descends into, computing both decimation phases
+ * across time instead of discarding one. That's what makes this shift-
+ * invariant: every leaf in getEnvelope() gets a fresh value on every push,
+ * not just once every 2^depth samples the way a critically-sampled WPT
+ * would -- at the cost of maintaining 2^depth Level objects and giving up
+ * exact invertibility.
  *
- * Forward decomposition only. Wavelet also derives the reconstruction
- * (synthesis) filter pair (h/l) alongside the decomposition pair (hp/lp),
- * but nothing here consumes h/l -- there is no inverse transform.
+ * Forward decomposition only, by design: this was built as a continuously-
+ * updating streaming decomposition (an alternative to a STFT or a fixed
+ * filter bank), not a compress/reconstruct codec. Wavelet still derives the
+ * reconstruction (synthesis) filter pair (h/l) alongside the decomposition
+ * pair (hp/lp) as a byproduct of deriving lp from hp, but nothing here
+ * consumes h/l.
  */
 namespace dsp {
 
@@ -106,64 +113,52 @@ namespace dsp {
 	};
 
 	/**
-	 * @brief Contract required of the type a Level tree delivers leaf
-	 * outputs to: a single add(address, value) callback, invoked once per
-	 * leaf address on every push().
-	 *
-	 * Checked via a static_assert against WPT below rather than as a
-	 * constraint on Level's own template parameter, since Level<WPT> is
-	 * named from inside WPT's own (still-incomplete) definition below;
-	 * constraining Level<Sink> directly would try to evaluate this concept
-	 * against that incomplete type at the point topLevel is declared.
+	 * @brief Interface for the type a Level tree delivers leaf outputs to: a
+	 * single add(address, value) callback, invoked once per leaf address on
+	 * every push().
 	 */
-	template<typename T>
-	concept FrameBuilder = requires(T& sink, std::uint32_t address, float value) {
-		sink.add(address, value);
+	class FrameBuilder {
+	public:
+		virtual void add(std::uint32_t address, float value) = 0;
 	};
 
 	/**
 	 * @brief One node of the recursive wavelet packet tree. Not intended to
 	 * be constructed directly -- WPT builds and owns the whole tree via its
 	 * topLevel member.
-	 *
-	 * Templated on the sink type (rather than dispatching through a
-	 * FrameBuilder base-class reference) so every leaf's add() call below is
-	 * a direct, inlinable call instead of a virtual one -- this runs
-	 * 2^maxDepth times per WPT::push().
 	 */
-	template<typename Sink>
 	class Level {
 	public:
 		/**
 		 * @brief Constructs this node and, if it isn't a leaf, its four
 		 * Even/Odd children.
-		 * @param maxDepth Total tree depth; this node is a leaf once
-		 *                 depth == maxDepth - 1.
-		 * @param depth    This node's depth from the root (0 at the root).
-		 * @param wavelet  The shared filter set convolved against at every
-		 *                 node in the tree.
-		 * @param sink     Receives leaf outputs via sink.add(address, value)
-		 *                 once this node (or a descendant) reaches a leaf;
-		 *                 see FrameBuilder.
-		 * @param address  This node's packet address, used to derive its
-		 *                 children's addresses.
+		 * @param maxDepth     Total tree depth; this node is a leaf once
+		 *                     depth == maxDepth - 1.
+		 * @param depth        This node's depth from the root (0 at the root).
+		 * @param wavelet      The shared filter set convolved against at
+		 *                     every node in the tree.
+		 * @param frameBuilder Receives leaf outputs via
+		 *                     frameBuilder.add(address, value) once this
+		 *                     node (or a descendant) reaches a leaf.
+		 * @param address      This node's packet address, used to derive
+		 *                     its children's addresses.
 		 */
-		Level(unsigned int maxDepth, unsigned int depth, const Wavelet& wavelet, Sink& sink, std::uint32_t address = 0)
+		Level(unsigned int maxDepth, unsigned int depth, const Wavelet& wavelet, FrameBuilder& frameBuilder, std::uint32_t address = 0)
 			: depth(depth), wavelet(wavelet), lowAddress(address << 1), highAddress((address << 1) | 1),
-			isLeaf(depth == maxDepth - 1), sink(sink), signal(wavelet.width) {
+			isLeaf(depth == maxDepth - 1), frameBuilder(frameBuilder), signal(wavelet.width) {
 			if(!isLeaf) {
-				lowEven = std::make_unique<Level>(maxDepth, depth + 1, wavelet, sink, lowAddress);
-				highEven = std::make_unique<Level>(maxDepth, depth + 1, wavelet, sink, highAddress);
-				lowOdd = std::make_unique<Level>(maxDepth, depth + 1, wavelet, sink, lowAddress);
-				highOdd = std::make_unique<Level>(maxDepth, depth + 1, wavelet, sink, highAddress);
+				lowEven = std::make_unique<Level>(maxDepth, depth + 1, wavelet, frameBuilder, lowAddress);
+				highEven = std::make_unique<Level>(maxDepth, depth + 1, wavelet, frameBuilder, highAddress);
+				lowOdd = std::make_unique<Level>(maxDepth, depth + 1, wavelet, frameBuilder, lowAddress);
+				highOdd = std::make_unique<Level>(maxDepth, depth + 1, wavelet, frameBuilder, highAddress);
 			}
 		}
 
 		/**
 		 * @brief Pushes one sample through this node: convolves it into
-		 * low/high outputs, then either delivers them to sink (if isLeaf)
-		 * or recurses into one of this node's two Even/Odd child pairs,
-		 * alternating each call to realize decimation-by-2 without
+		 * low/high outputs, then either delivers them to frameBuilder (if
+		 * isLeaf) or recurses into one of this node's two Even/Odd child
+		 * pairs, alternating each call to realize decimation-by-2 without
 		 * buffering a block first.
 		 */
 		void push(float value) {
@@ -176,9 +171,9 @@ namespace dsp {
 			const float highValue = convolve(wavelet.hp);
 
 			if(isLeaf) {
-				// Send to the sink
-				sink.add(lowAddress, lowValue);
-				sink.add(highAddress, highValue);
+				// Send to frame builders
+				frameBuilder.add(lowAddress, lowValue);
+				frameBuilder.add(highAddress, highValue);
 			} else {
 				// Send to lower levels
 				if(pushToEven) {
@@ -210,10 +205,10 @@ namespace dsp {
 		const Wavelet& wavelet;          ///< The shared filter set convolved against at every node.
 		const std::uint32_t lowAddress;  ///< Packet address this node's low-band output (leaf) or low subtree (non-leaf) writes to.
 		const std::uint32_t highAddress; ///< Packet address this node's high-band output (leaf) or high subtree (non-leaf) writes to.
-		const bool isLeaf;                ///< True once depth == maxDepth - 1; leaves call sink.add() instead of recursing.
+		const bool isLeaf;                ///< True once depth == maxDepth - 1; leaves call frameBuilder.add() instead of recursing.
 
 	private:
-		Sink& sink;
+		FrameBuilder& frameBuilder;
 
 		bool pushToEven = true;
 		std::unique_ptr<Level> lowEven;
@@ -225,7 +220,7 @@ namespace dsp {
 		unsigned int oldestSignalIndex = 0;
 	};
 
-	class WPT {
+	class WPT : public FrameBuilder {
 	public:
 		/**
 		 * @brief Constructs a wavelet packet transform tree.
@@ -255,10 +250,10 @@ namespace dsp {
 		}
 
 		/**
-		 * @brief FrameBuilder sink callback invoked by the Level tree during
+		 * @brief FrameBuilder callback invoked by the Level tree during
 		 * push() -- not intended to be called directly; call push() instead.
 		 */
-		void add(std::uint32_t address, float value) {
+		void add(std::uint32_t address, float value) override {
 			envelope[address] = value;
 		}
 
@@ -280,11 +275,9 @@ namespace dsp {
 		}
 
 		Wavelet wavelet;
-		Level<WPT> topLevel;
+		Level topLevel;
 
 		std::vector<float> envelope;
 	};
-
-	static_assert(FrameBuilder<WPT>, "WPT must satisfy the FrameBuilder contract Level relies on.");
 
 }

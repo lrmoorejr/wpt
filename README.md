@@ -4,7 +4,23 @@ A full Wavelet Packet Transform: given a mother wavelet's decomposition filter, 
 splits both the low- and high-pass sub-bands at every level -- unlike a plain DWT, which only
 recurses on the low/approximation branch. `push()` is per-sample and online (not block-based):
 each tree node keeps a small circular buffer and alternates which of two physical sub-levels
-receives a given push, realizing decimation-by-2 without buffering a block first.
+receives a given push, computing *both* decimation phases across time instead of discarding one.
+That's what makes it shift-invariant: every leaf address in `getEnvelope()` gets a fresh value on
+every single push, not just once every `2^depth` samples the way a critically-sampled WPT would --
+at the cost of giving up exact invertibility (see Limitations below).
+
+I originally wrote this while investigating whether a shift-invariant wavelet packet decomposition
+might work better than a STFT or a fixed filter bank for some streaming analysis I was doing -- a
+wavelet packet tree gives finer time resolution at the high-frequency leaves and finer frequency
+resolution at the low ones "for free" from the recursive dyadic splitting, rather than needing to
+hand-design each band the way a filter bank does. I ended up not adopting the approach for that
+project, for reasons I don't fully remember, but the technique still seemed elegant enough to keep
+around for the next time I have the same thought.
+
+Furthermore, there really aren't a lot of simple C++ examples of WPT transforms floating around.
+It's not a complicated concept, but having some working example to start with may be helpful --
+particularly for the shift-invariant/streaming variant specifically, since most examples you'll
+find elsewhere are the critically-sampled kind.
 
 ```cpp
 #include "WPT.hpp"
@@ -44,9 +60,13 @@ dsp::WPT wpt({-0.1294f, -0.2241f, 0.8365f, -0.4830f}, 10);  // Daubechies-2
 
 ### Limitations
 
-This is forward decomposition only -- there is no inverse/reconstruction transform. `Wavelet`
-derives the reconstruction (synthesis) filter pair alongside the decomposition pair, but nothing
-in this header currently consumes it.
+This is forward decomposition only -- there is no inverse/reconstruction transform. That's a
+consequence of what it was built for (see above): a continuously-updating streaming decomposition
+to read from, not a compress/reconstruct codec. If you need the original signal back, this isn't
+the transform for that -- you'd want a standard critically-sampled WPT (one child per level
+instead of two) paired with its synthesis filters. `Wavelet` still derives that reconstruction
+(synthesis) filter pair (`h`/`l`) alongside the decomposition pair (`hp`/`lp`) as a byproduct of
+deriving `lp` from `hp`, but nothing in this header consumes `h`/`l`.
 
 ### Validation
 
