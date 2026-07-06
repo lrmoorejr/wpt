@@ -17,12 +17,14 @@
  */
 
 #include <memory>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 // Ensure.hpp is an optional dependency: if it's available (either as part of this
-// checkout or vendored alongside this header), use its ensure() for a formatted
-// diagnostic on failure; otherwise fall back to plain assert() so this header still
-// works standalone.
+// checkout or vendored alongside this header), use its ensure()/throw_if() for a
+// formatted diagnostic on failure; otherwise fall back to equivalent local
+// implementations so this header still works standalone.
 #if __has_include("commons/Ensure.hpp")
 	#include "commons/Ensure.hpp"
 #elif __has_include("Ensure.hpp")
@@ -35,6 +37,18 @@
 	// itself, so this still catches that case even under an unknown filename.
 	#if !defined(COMMONS_ENSURE_HPP) && !defined(ensure)
 		#define ensure(condition, ...) assert((condition))
+	#endif
+	// (throw_if is a function template, not a macro, so #ifndef can't guard
+	// it directly -- redefining it without this check would be a hard error.)
+	// A second guard (distinct from COMMONS_ENSURE_HPP) covers the case where two
+	// headers using this same standalone fallback are included together.
+	#if !defined(COMMONS_ENSURE_HPP) && !defined(COMMONS_THROW_IF_FALLBACK_DEFINED)
+	#define COMMONS_THROW_IF_FALLBACK_DEFINED
+	template<class T, class... Args>
+	constexpr inline void throw_if(bool condition, Args&&... args) {
+		if (condition)
+			throw T(std::forward<Args>(args)...);
+	}
 	#endif
 #endif
 
@@ -80,11 +94,11 @@ namespace dsp {
 		 * @param mother The decomposition high-pass (detail) filter
 		 *               coefficients, e.g. {1, -1} for Haar. Must be
 		 *               non-empty.
-		 * @note Terminates the process (via ensure()) if mother is empty.
+		 * @note Throws std::invalid_argument if mother is empty.
 		 */
 		Wavelet(const std::vector<float>& mother)
 			: hp(mother), h(mirror(mother)), lp(flipSigns(h)), l(mirror(lp)), width(mother.size()) {
-			ensure(!mother.empty(), "Wavelet requires a non-empty mother filter.");
+			throw_if<std::invalid_argument>(mother.empty(), "Wavelet requires a non-empty mother filter.");
 		}
 
 		/// @brief Reverses a filter's tap order.
@@ -236,8 +250,7 @@ namespace dsp {
 		 *                 non-empty.
 		 * @param maxDepth Number of tree levels; getEnvelope() will hold
 		 *                 2^maxDepth addresses. Must be > 0.
-		 * @note Terminates the process (via ensure()) if mother is empty or
-		 *       maxDepth is 0.
+		 * @note Throws std::invalid_argument if mother is empty or maxDepth is 0.
 		 */
 		WPT(const std::vector<float>& mother, unsigned int maxDepth = 10)
 			: wavelet(mother), topLevel(checkedDepth(maxDepth), 0, wavelet, *this), envelope(1 << maxDepth) {
@@ -277,7 +290,7 @@ namespace dsp {
 		// Level::isLeaf never true and recurse without bound; called from the
 		// member-initializer list so topLevel is never constructed with a bad depth.
 		static unsigned int checkedDepth(unsigned int maxDepth) {
-			ensure(maxDepth > 0, "WPT requires maxDepth > 0.");
+			throw_if<std::invalid_argument>(maxDepth == 0, "WPT requires maxDepth > 0.");
 			return maxDepth;
 		}
 
