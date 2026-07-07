@@ -1,5 +1,7 @@
 # WPT.hpp
 
+[API docs](https://lrmoorejr.github.io/wpt/)
+
 A full Wavelet Packet Transform: given a mother wavelet's decomposition filter, recursively
 splits both the low- and high-pass sub-bands at every level -- unlike a plain DWT, which only
 recurses on the low/approximation branch. `push()` is per-sample and online (not block-based):
