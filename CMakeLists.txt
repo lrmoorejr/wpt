@@ -26,7 +26,7 @@ endif()
 # Catches member-initializer-list order mismatching declaration order (C++
 # initializes in declaration order regardless of initializer-list order) --
 # the root cause of a past intermittent segfault in this header.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wreorder")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wreorder -Wall -Wextra -Wpedantic -Werror")
 
 find_package(Catch2 3 REQUIRED)
 
